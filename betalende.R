@@ -177,7 +177,7 @@ fit_trends <- df_ts %>%
     piecewise = TSLM(num ~ trend()))
 
 
-fc_trends <- fit_trends %>% forecast(h="3 months")
+fc_trends <- fit_trends %>% forecast(h = "3 months")
 fc_trends %>% autoplot(df_ts,level=NULL)
 
 # ETS
@@ -213,7 +213,7 @@ df_ts %>%
 #   order of the moving average part. 
 
 fit <- df_ts %>%
-  model(ARIMA(num ~ PDQ(0,0,0)))
+  model(ARIMA(t ~ PDQ(0,0,0)))
 
 report(fit)
 
