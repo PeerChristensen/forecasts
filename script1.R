@@ -83,8 +83,6 @@ comp <- df_ts_mon %>%
 components(comp)  %>% autoplot() + xlab("Year")
 
 
-
-
 # tilgang
 #daily
 df %>%

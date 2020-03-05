@@ -433,7 +433,8 @@ daily_fc <- fc_betalende %>%
   mutate(Free = gratis) %>%
   inner_join(fc_samlet) %>%
   inner_join(fc_start) %>%
-  inner_join(fc_end)
+  inner_join(fc_end) %>%
+  mutate_if(is.numeric, round)
 
 monthly <- revenue %>%
   inner_join(streaming_cost) %>%
@@ -443,7 +444,8 @@ monthly <- revenue %>%
   inner_join(tilgang_måned) %>%
   inner_join(afgang_måned) %>%
   inner_join(fc_streamers) %>%
-  mutate(AndelStreamers = nStreamers / Bestand * 100)
+  mutate(AndelStreamers = nStreamers / Bestand * 100) %>%
+  mutate_at(vars(revenue, cost,Betalende,Bestand,tilgang,afgang,nStreamers), round)
   
 data <- list(Daily = daily_fc, Monthly = monthly)
 
