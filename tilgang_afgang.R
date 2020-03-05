@@ -44,7 +44,8 @@ df %>%
   ggplot(aes(date,n,colour = type)) +
   geom_line(size=1, alpha= .8) +
   theme_minimal() +
-  scale_color_viridis_d(option="C",end=.8)
+  scale_color_viridis_d(option="C",end=.8) +
+  facet_wrap(~type,ncol=1)
 
 # difference 
 df %>%
@@ -91,8 +92,8 @@ df_ts <- df  %>%
 # --------------------------------------------------------------------------------------------------
 # 1. (three unusual observations)
 df_ts %>%
-  ggplot(aes(date,Start)) +
-  geom_point()
+  ggplot(aes(Date,Start)) +
+  geom_line()
 
 # --------------------------------------------------------------------------------------------------
 # 2. Box cox transformation (if variance is not constant)
@@ -122,12 +123,13 @@ fit_tilgang %>% gg_tsresiduals()
 
 # 7. calculate forecasts
 fc_tilgang <- fit_tilgang %>% 
-  forecast(h="1 year") 
+  forecast(h=as.numeric(as.Date("2020-12-31") - today()+1))
 
 # 8. plot
 fc_tilgang %>% 
   autoplot(df_ts, level = NULL) +
   geom_smooth() +
+  geom_smooth(method="lm",colour="green") +
   theme_minimal()  +
   ylim(c(0,1000)) +
   ggtitle("Tilgang pr. dag 1 års forecast")
@@ -172,12 +174,13 @@ fit_afgang %>% gg_tsresiduals()
 
 # 7. calculate forecasts
 fc_afgang <- fit_afgang %>% 
-  forecast(h="1 year") 
+  forecast(h=as.numeric(as.Date("2020-12-31") - today()+1))
 
 # 8. plot
 fc_afgang %>% 
   autoplot(df_ts, level = NULL) +
   geom_smooth() +
+  geom_smooth(method = "lm",colour="green") +
   theme_minimal()  +
  # ylim(c(0,1000)) +
   ggtitle("Afgang pr. dag 1 års forecast")
@@ -215,21 +218,25 @@ fit_diff <- df_ts %>%
   #model(arima = ARIMA(box_cox(Start,lambda=lambda)))
   model(arima = ARIMA(Difference))
 
+
 report(fit_diff)
+
+augment(fit_diff) %>%
+  features(.resid, ljung_box, lag = 7)
 
 # 6. Check residuals
 fit_diff %>% gg_tsresiduals()
 
 # 7. calculate forecasts
 fc_diff <- fit_diff %>% 
-  forecast(h="1 year") 
+  forecast(h=as.numeric(as.Date("2020-12-31") - today()+1))
 
 # 8. plot
 fc_diff %>% 
   autoplot(df_ts, level = NULL) +
   geom_smooth() +
   theme_minimal()  +
-  # ylim(c(0,1000)) +
+   ylim(c(-100,1000)) +
   ggtitle("Difference pr. dag 1 års forecast")
 
 

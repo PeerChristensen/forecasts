@@ -146,15 +146,15 @@ accuracy(fc, df_ts)
 fc %>%
   autoplot(filter(df_ts, year(date) >= 2018),level = NULL,size=1)
 
-# cross-validation - not working!
+# cross-validation 
 cv <- df_ts %>%
   slice(1:(n()-8)) %>%
-  stretch_tsibble(.init = 3, .step = 1)
+  stretch_tsibble(.init = 100, .step = 10)
 
 fc <- cv %>%
   model(
-        arima = ARIMA(log(num))) %>%
-  forecast(h="1 week")
+        arima = ARIMA(log(Start))) %>%
+  forecast(h=7)
 
 accuracy(fc, df_ts)
 
@@ -206,11 +206,12 @@ df_ts %>%
 
 # auto select arima model
 # p=
-#   order of the autoregressive part;
+#   order of the autoregressive part; 
 # d=
 #   degree of first differencing involved;
 # q=
 #   order of the moving average part. 
+# e.g. ARIMA(2,1,2) = 2 past errors, 1x differencing and 2 past observations are used in the equation
 
 fit <- df_ts %>%
   model(ARIMA(t ~ PDQ(0,0,0)))
