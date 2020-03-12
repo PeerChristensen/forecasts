@@ -613,3 +613,45 @@ smtp <- server(host     = creds[[1]],
 
 smtp(email, verbose = F)
 
+
+# cross-validation
+
+data <- df_ts %>%
+  slice(-n()) %>%
+ stretch_tsibble(.init = 5,.step=1) %>%
+  model(
+    arima2 = ARIMA(Betalende_start)
+  ) %>%
+  forecast(h = 1) %>%
+  accuracy(df_ts)
+
+slice(1:(n()-30)) %>%
+  stretch_tsibble(.init = 100, .step = 10)
+
+# validation
+
+accuracies <- NULL
+
+for (i in names(df[,-1])) {
+  
+  df_ts <- df %>% select(month,i) %>% as_tsibble()
+  
+  train <- df_ts %>% filter(month <= yearmonth(today()-months(2)))
+
+  fit <- train %>%
+    model(
+      arima = ARIMA()
+      )
+  
+  fc <- fit %>%
+    forecast(h = "1 month")
+
+  acc <- accuracy(fc, df_ts)
+  accuracies = rbind(accuracies,acc)
+  
+}
+
+accuracies %>%
+  mutate(name = names(df[,-1])) %>%
+  select(name, .model, MAPE)
+
