@@ -98,7 +98,7 @@ order by [EventDate_Key],
 	et.CustomerEventTypeName DESC"
 
 # -----------------------------------------------------------------------------------------
-# Antal bestanden der streamer
+# Antal i bestanden der streamer
 # -----------------------------------------------------------------------------------------
 
 query4 <- "SELECT TOP 1000  
@@ -120,36 +120,60 @@ query4 <- "SELECT TOP 1000
 # get and preprocess data
 # -----------------------------------------------------------------------------------------
 
-df1 <- sqlQuery(channel,query1)
+df1 <- sqlQuery(channel,query1) %>%
+  mutate(month = yearmonth(ymd(Date))) %>%
+  filter(month < yearmonth(today())) %>%
+  group_by(month) %>%
+  summarise(M_Buckets = round(sum(nBuckets) / 1000000,2))
 
 df2 <- sqlQuery(channel,query2) %>%
   mutate(Period  = fct_recode(as.factor(Period), Betalende = "1", Gratis = "2")) %>%
-  pivot_wider(names_from = Period, values_from = nSubscribers)
+  pivot_wider(names_from = Period, values_from = nSubscribers) %>%
+  drop_na() %>%
+  mutate(Date = ymd(Date)) %>%
+  mutate(month = yearmonth(ymd(Date))) %>%
+  filter(month < yearmonth(today())) %>%
+  group_by(month) %>%
+  mutate(Betalende_start = if_else(Date == min(Date),Betalende,NULL),
+         Betalende_slut = if_else(Date == max(Date),Betalende,NULL),
+         Gratis_start = if_else(Date == min(Date),Gratis,NULL),
+         Gratis_slut = if_else(Date == max(Date),Gratis,NULL)) %>%
+  summarise(Betalende_start = sum(Betalende_start,na.rm=T),
+            Betalende_slut = sum(Betalende_slut,na.rm=T),
+            Gratis_start = sum(Gratis_start,na.rm=T),
+            Gratis_slut = sum(Gratis_slut,na.rm=T))
 
 df3 <- sqlQuery(channel,query3) %>%
-  mutate(eventType = fct_recode(eventType, Start = "Subscription Start", End = "Subscription End")) %>%
-  pivot_wider(names_from = eventType, values_from = n)
+  mutate(eventType = fct_recode(eventType, Tilgang = "Subscription Start", Afgang = "Subscription End")) %>%
+  pivot_wider(names_from = eventType, values_from = n) %>%
+  mutate(month = yearmonth(ymd(Date))) %>%
+  filter(month < yearmonth(today())) %>%
+  select(-Date) %>%
+  group_by(month) %>%
+  summarise_all(sum)
+  
 
-df4 <-  sqlQuery(channel,query4)
+df4 <-  sqlQuery(channel,query4) %>%
+  mutate(month = yearmonth(as.character(month))) %>%
+  rename(AntalStreamere = n)
 
 close(channel)
 
 df <- df2 %>%
   left_join(df1) %>%
   left_join(df3) %>%
-  as_tibble() %>%
-  mutate(Date = as.Date(as.character(Date), format = "%Y%m%d")) %>%
-  filter(Date < today()) %>%
-  mutate(SamletBestand = Betalende + Gratis)
-
-# # check Date gaps
-# df %>%
-#   mutate(diff = Date - lag(Date, 1) == 1) %>%
-#   count(diff)
-# 
-# # check gaps
-# df %>%filter_all(any_vars(is.na(.)))
-
+  left_join(df4) %>%
+  mutate(SamletBestand_start = Betalende_start + Gratis_start,
+         SamletBestand_slut = Betalende_slut + Gratis_slut) %>%
+  mutate(month = yearmonth(month))
+  
+df %>%
+  pivot_longer(cols = -month) %>%
+  ggplot(aes(month,value)) +
+    geom_line() +
+    facet_wrap(~name,scales="free") +
+  theme_minimal()
+    
 # create tsibble
 df_ts <- df  %>% 
   as_tsibble() %>%
@@ -161,20 +185,26 @@ df_ts <- df  %>%
 
 # Box-cox transformation (due to non-constant variance)
 lambda <- df_ts %>%
-  features(nBuckets, features = guerrero) %>%
+  features(M_Buckets, features = guerrero) %>%
   pull(lambda_guerrero)
 
 # fit ARIMA model
 fit_streaming <- df_ts %>%
-  model(arima = ARIMA(box_cox(nBuckets,lambda=lambda)))
-
+  #model(arima = ARIMA(box_cox(M_Buckets,lambda=lambda)))
+  model(arima = ARIMA(M_Buckets))
+  
 # calculate forecasts
 fc_streaming <- fit_streaming %>% 
-  forecast(h=as.numeric(as.Date("2020-12-31") - today()+1)) %>%
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
   hilo() %>% 
   as_tibble() %>%
   rename(nBuckets_ci80 = `80%`, nBuckets_ci95 = `95%`) %>%
   select(-.model)
+
+# Plot
+fit_streaming %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+  autoplot(df_ts)
 
 # -----------------------------------------------------------------------------------------
 # Forecast Antal betalende medlemmer
@@ -348,7 +378,7 @@ revenue <- fc_betalende %>%
   group_by(month =month(Date)) %>%
   summarise(Revenue = sum(Revenue)) %>%
   mutate(month = month.name[month])
-  
+
 # -----------------------------------------------------------------------------------------
 # Beregning af Gennemsnitlig streamingcost pr. enhed
 # -----------------------------------------------------------------------------------------
@@ -407,11 +437,11 @@ churn <- afgang %>%
 #   filter(month != max(month)) %>%
 #   ggplot(aes(month,n)) +
 #   geom_line()
-  
+
 df4_ts <- df4 %>%
-   mutate(month = yearmonth(as.Date(month))) %>%
-   filter(month != max(month)) %>%
-   as_tsibble()
+  mutate(month = yearmonth(as.Date(month))) %>%
+  filter(month != max(month)) %>%
+  as_tsibble()
 
 # fit ARIMA model
 fit_streamers <- df4_ts %>%
@@ -438,7 +468,7 @@ daily_fc <- fc_betalende %>%
   inner_join(fc_start) %>%
   inner_join(fc_end) %>%
   mutate_if(is.numeric, round)
- 
+
 
 monthly <- revenue %>%
   inner_join(streaming_cost) %>%
@@ -452,7 +482,7 @@ monthly <- revenue %>%
   mutate_at(vars(Revenue, Cost,Betalende,SamletBestand,tilgang,afgang,AntalStreamere), round) %>%
   mutate_at(vars(ChurnRate1, ChurnRate2,AndelStreamere), round,1)
 
-  
+
 data <- list(Daily = daily_fc, Monthly = monthly)
 
 filename <- glue::glue("C:/Users/pech/Desktop/RProjects/ForecastAbo/forecasts/forecasts_{today()}.xlsx")

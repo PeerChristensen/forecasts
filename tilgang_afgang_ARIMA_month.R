@@ -41,6 +41,7 @@ df <- sqlQuery(channel, query) %>%
   select(date, type = CustomerEventTypeName,n) %>%
   mutate(type = fct_recode(type, Start = "Subscription Start", End = "Subscription End")) %>%
   mutate(month = yearmonth(date)) %>%
+  filter(month != yearmonth(today())) %>%
   group_by(month, type) %>%
   summarise(n = sum(n))
 
@@ -98,11 +99,12 @@ lambda <- df_ts %>%
 # --------------------------------------------------------------------------------------------------
 # 3. - 5. fit ARIMA model
 
+
 fit_tilgang <- df_ts %>%
  # filter(Start < mean(Start) +2*sd(Start)) %>% # remove outliers
  # tsibble::fill_gaps() %>% # fill gaps
-  #model(arima = ARIMA(box_cox(Start,lambda=lambda)))
-  model(arima = ARIMA(Start))
+  model(
+    arima = ARIMA(box_cox(Start,lambda=lambda)))
 
 report(fit_tilgang)
 
@@ -111,11 +113,11 @@ fit_tilgang %>% gg_tsresiduals()
 
 # 7. calculate forecasts
 fc_tilgang <- fit_tilgang %>% 
-  forecast(h="1 year") 
+  forecast(h=as.numeric(month(as.Date("2020-12-31")) - month(today())+1)) 
 
 # 8. plot
 fc_tilgang %>% 
-  autoplot(df_ts, level = NULL) +
+  autoplot(df_ts) +
   geom_smooth() +
   theme_minimal()  +
   #ylim(c(0,1000)) +
