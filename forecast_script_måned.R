@@ -1,27 +1,27 @@
-# -----------------------------------------------------------------------------------------
-# Forecast script
-# Peer Christensen
-# marts 2020
-
-# forecasts på dagsniveau
-
-# 1. Antal streaming buckets
-# 2. Antal betalende medlemmer
-# 3. Antal gratis medlemmer (samlet - betalende)
-# 4. Samlet antal medlemmer
-# 5. tilgang
-# 6. afgang
-
-# mdlige beregninger
-
-# 7. Omsætning (2.333 * antal betalende)
-# 8. Gennemsnitlig streamingcost pr. bog ( (streaming buckets * 29) /100 )
-# 9. Churn rate
-
-# -----------------------------------------------------------------------------------------
-# Pakker
-# -----------------------------------------------------------------------------------------
-
+# # -----------------------------------------------------------------------------------------
+# # Forecast script
+# # Peer Christensen
+# # marts 2020
+# 
+# # forecasts på dagsniveau
+# 
+# # 1. Antal streaming buckets
+# # 2. Antal betalende medlemmer
+# # 3. Antal gratis medlemmer (samlet - betalende)
+# # 4. Samlet antal medlemmer
+# # 5. tilgang
+# # 6. afgang
+# 
+# # mdlige beregninger
+# 
+# # 7. Omsætning (2.333 * antal betalende)
+# # 8. Gennemsnitlig streamingcost pr. bog ( (streaming buckets * 29) /100 )
+# # 9. Churn rate
+# 
+# # -----------------------------------------------------------------------------------------
+# # Pakker
+# # -----------------------------------------------------------------------------------------
+# 
 library(RODBC)
 library(tidyverse)
 library(lubridate)
@@ -32,141 +32,147 @@ library(emayili)
 library(fable)
 library(feasts)
 
-# -----------------------------------------------------------------------------------------
-# SQL login
-# -----------------------------------------------------------------------------------------
+theme_set(theme_minimal())
+# 
+# # -----------------------------------------------------------------------------------------
+# # SQL login
+# # -----------------------------------------------------------------------------------------
+# 
+# credentials <- read_rds("C:/Users/pech/Desktop/RProjects/ForecastAbo/credentials.rds")
+# 
+# channel <- odbcConnect(credentials[1],credentials[2],credentials[3])
+# 
+# # -----------------------------------------------------------------------------------------
+# # Streaming query
+# # -----------------------------------------------------------------------------------------
+# 
+# query1 <- "SELECT Date_Key as Date,
+# 	  count(*) as nBuckets
+# 
+# 
+#   FROM [EDW].[fact].[ReaderFact] as reader
+# 
+# 
+#   where Date_Key >= 20180101
+# and Customer_Key != -1
+# 
+# group by Date_Key
+# order by Date_Key"
+# 
+# # -----------------------------------------------------------------------------------------
+# # Medlemsantal query
+# # -----------------------------------------------------------------------------------------
+# 
+# query2 <- "SELECT
+# 	SubscriptionMembersDate_Key as Date,
+# 	PaidSubscriptionPeriod_Key as Period,
+# 	sum(SubscriptionMembers) as nSubscribers
+# 
+# FROM
+# 	[EDW].[fact].[SubscriptionMembersFact]
+# 
+# where SubscriptionMembers > 0
+#   and SubscriptionMembersDate_Key >= 20180101
+# 
+# group by SubscriptionMembersDate_Key, PaidSubscriptionPeriod_Key
+# order by SubscriptionMembersDate_Key"
+# 
+# # -----------------------------------------------------------------------------------------
+# # Tilgang-afgang query
+# # -----------------------------------------------------------------------------------------
+# 
+# query3 <- "SELECT
+# 	[EventDate_Key] as Date,
+# 	et.CustomerEventTypeName as eventType,
+#     count(*) as n
+# 
+# 
+# FROM [EDW].[edw].[CustomerEventFact] f
+# INNER JOIN [EDW].[dim].[CustomerEventType] et ON et.CustomerEventType_Key = f.CustomerEventType_Key
+# 
+# WHERE
+# et.CustomerEventTypeID IN (1, 3)
+# and EventDate_Key >= 20180101
+# 
+# group by [EventDate_Key],
+# 	et.CustomerEventTypeName
+# order by [EventDate_Key],
+# 	et.CustomerEventTypeName DESC"
+# 
+# # -----------------------------------------------------------------------------------------
+# # Antal i bestanden der streamer
+# # -----------------------------------------------------------------------------------------
+# 
+# query4 <- "SELECT TOP 1000
+# 
+# 	 d.[Month] as month
+# 	,count(distinct [Customer_Key]) as n
+# 
+#  FROM [EDW].[fact].[ReaderFact] f
+#  INNER JOIN EDW.dim.[Date] d ON d.Date_Key = f.Date_Key
+# 
+#  where f.Date_Key >= 20180101
+#  AND f.IsBucketRead_Key = 1
+# 
+#  group by d.[Month]
+# 
+#  order by d.[Month]"
+# 
+# # -----------------------------------------------------------------------------------------
+# # get and preprocess data
+# # -----------------------------------------------------------------------------------------
+# 
+# df1 <- sqlQuery(channel,query1) %>%
+#   mutate(month = yearmonth(ymd(Date))) %>%
+#   filter(month < yearmonth(today())) %>%
+#   group_by(month) %>%
+#   summarise(M_Buckets = round(sum(nBuckets) / 1000000,2))
+# 
+# df2 <- sqlQuery(channel,query2) %>%
+#   mutate(Period  = fct_recode(as.factor(Period), Betalende = "1", Gratis = "2")) %>%
+#   pivot_wider(names_from = Period, values_from = nSubscribers) %>%
+#   drop_na() %>%
+#   mutate(Date = ymd(Date)) %>%
+#   mutate(month = yearmonth(ymd(Date))) %>%
+#   filter(month < yearmonth(today())) %>%
+#   group_by(month) %>%
+#   mutate(Betalende_start = if_else(Date == min(Date),Betalende,NULL),
+#          Betalende_slut = if_else(Date == max(Date),Betalende,NULL),
+#          Gratis_start = if_else(Date == min(Date),Gratis,NULL),
+#          Gratis_slut = if_else(Date == max(Date),Gratis,NULL)) %>%
+#   summarise(Betalende_start = sum(Betalende_start,na.rm=T),
+#             Betalende_slut = sum(Betalende_slut,na.rm=T),
+#             Gratis_start = sum(Gratis_start,na.rm=T),
+#             Gratis_slut = sum(Gratis_slut,na.rm=T))
+# 
+# df3 <- sqlQuery(channel,query3) %>%
+#   mutate(eventType = fct_recode(eventType, Tilgang = "Subscription Start", Afgang = "Subscription End")) %>%
+#   pivot_wider(names_from = eventType, values_from = n) %>%
+#   mutate(month = yearmonth(ymd(Date))) %>%
+#   filter(month < yearmonth(today())) %>%
+#   select(-Date) %>%
+#   group_by(month) %>%
+#   summarise_all(sum)
+# 
+# 
+# df4 <-  sqlQuery(channel,query4) %>%
+#   mutate(month = yearmonth(as.character(month))) %>%
+#   rename(AntalStreamere = n)
+# 
+# close(channel)
+# 
+# df <- df2 %>%
+#   left_join(df1) %>%
+#   left_join(df3) %>%
+#   left_join(df4) %>%
+#   mutate(SamletBestand_start = Betalende_start + Gratis_start,
+#          SamletBestand_slut = Betalende_slut + Gratis_slut) %>%
+#   mutate(month = yearmonth(month))
 
-credentials <- read_rds("C:/Users/pech/Desktop/RProjects/ForecastAbo/credentials.rds")
+df <- read_csv2("forecast_data_2020-03-12.csv") %>%
+  mutate(M_Buckets = as.numeric(M_Buckets),
+         month = yearmonth(month))
 
-channel <- odbcConnect(credentials[1],credentials[2],credentials[3])
-
-# -----------------------------------------------------------------------------------------
-# Streaming query
-# -----------------------------------------------------------------------------------------
-
-query1 <- "SELECT Date_Key as Date,
-	  count(*) as nBuckets
-
-
-  FROM [EDW].[fact].[ReaderFact] as reader
-  
-
-  where Date_Key >= 20180101
-and Customer_Key != -1
-
-group by Date_Key
-order by Date_Key"
-
-# -----------------------------------------------------------------------------------------
-# Medlemsantal query
-# -----------------------------------------------------------------------------------------
-
-query2 <- "SELECT 
-	SubscriptionMembersDate_Key as Date,
-	PaidSubscriptionPeriod_Key as Period,
-	sum(SubscriptionMembers) as nSubscribers
-
-FROM 
-	[EDW].[fact].[SubscriptionMembersFact]
-
-where SubscriptionMembers > 0
-  and SubscriptionMembersDate_Key >= 20180101
-
-group by SubscriptionMembersDate_Key, PaidSubscriptionPeriod_Key
-order by SubscriptionMembersDate_Key"
-
-# -----------------------------------------------------------------------------------------
-# Tilgang-afgang query
-# -----------------------------------------------------------------------------------------
-
-query3 <- "SELECT 
-	[EventDate_Key] as Date,
-	et.CustomerEventTypeName as eventType,
-    count(*) as n
-
-
-FROM [EDW].[edw].[CustomerEventFact] f
-INNER JOIN [EDW].[dim].[CustomerEventType] et ON et.CustomerEventType_Key = f.CustomerEventType_Key
-
-WHERE 
-et.CustomerEventTypeID IN (1, 3)
-and EventDate_Key >= 20180101
-
-group by [EventDate_Key],
-	et.CustomerEventTypeName
-order by [EventDate_Key],
-	et.CustomerEventTypeName DESC"
-
-# -----------------------------------------------------------------------------------------
-# Antal i bestanden der streamer
-# -----------------------------------------------------------------------------------------
-
-query4 <- "SELECT TOP 1000  
-
-	 d.[Month] as month
-	,count(distinct [Customer_Key]) as n
-
- FROM [EDW].[fact].[ReaderFact] f
- INNER JOIN EDW.dim.[Date] d ON d.Date_Key = f.Date_Key
-
- where f.Date_Key >= 20180101
- AND f.IsBucketRead_Key = 1
- 
- group by d.[Month]
-
- order by d.[Month]"
-
-# -----------------------------------------------------------------------------------------
-# get and preprocess data
-# -----------------------------------------------------------------------------------------
-
-df1 <- sqlQuery(channel,query1) %>%
-  mutate(month = yearmonth(ymd(Date))) %>%
-  filter(month < yearmonth(today())) %>%
-  group_by(month) %>%
-  summarise(M_Buckets = round(sum(nBuckets) / 1000000,2))
-
-df2 <- sqlQuery(channel,query2) %>%
-  mutate(Period  = fct_recode(as.factor(Period), Betalende = "1", Gratis = "2")) %>%
-  pivot_wider(names_from = Period, values_from = nSubscribers) %>%
-  drop_na() %>%
-  mutate(Date = ymd(Date)) %>%
-  mutate(month = yearmonth(ymd(Date))) %>%
-  filter(month < yearmonth(today())) %>%
-  group_by(month) %>%
-  mutate(Betalende_start = if_else(Date == min(Date),Betalende,NULL),
-         Betalende_slut = if_else(Date == max(Date),Betalende,NULL),
-         Gratis_start = if_else(Date == min(Date),Gratis,NULL),
-         Gratis_slut = if_else(Date == max(Date),Gratis,NULL)) %>%
-  summarise(Betalende_start = sum(Betalende_start,na.rm=T),
-            Betalende_slut = sum(Betalende_slut,na.rm=T),
-            Gratis_start = sum(Gratis_start,na.rm=T),
-            Gratis_slut = sum(Gratis_slut,na.rm=T))
-
-df3 <- sqlQuery(channel,query3) %>%
-  mutate(eventType = fct_recode(eventType, Tilgang = "Subscription Start", Afgang = "Subscription End")) %>%
-  pivot_wider(names_from = eventType, values_from = n) %>%
-  mutate(month = yearmonth(ymd(Date))) %>%
-  filter(month < yearmonth(today())) %>%
-  select(-Date) %>%
-  group_by(month) %>%
-  summarise_all(sum)
-  
-
-df4 <-  sqlQuery(channel,query4) %>%
-  mutate(month = yearmonth(as.character(month))) %>%
-  rename(AntalStreamere = n)
-
-close(channel)
-
-df <- df2 %>%
-  left_join(df1) %>%
-  left_join(df3) %>%
-  left_join(df4) %>%
-  mutate(SamletBestand_start = Betalende_start + Gratis_start,
-         SamletBestand_slut = Betalende_slut + Gratis_slut) %>%
-  mutate(month = yearmonth(month))
-  
 df %>%
   pivot_longer(cols = -month) %>%
   ggplot(aes(month,value)) +
@@ -183,76 +189,112 @@ df_ts <- df  %>%
 # Forecast streaming buckets
 # -----------------------------------------------------------------------------------------
 
-# Box-cox transformation (due to non-constant variance)
-lambda <- df_ts %>%
-  features(M_Buckets, features = guerrero) %>%
-  pull(lambda_guerrero)
-
 # fit ARIMA model
 fit_streaming <- df_ts %>%
-  #model(arima = ARIMA(box_cox(M_Buckets,lambda=lambda)))
-  model(arima = ARIMA(M_Buckets))
-  
+  model(
+    arima = ARIMA(M_Buckets))
+
 # calculate forecasts
 fc_streaming <- fit_streaming %>% 
   forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
   hilo() %>% 
   as_tibble() %>%
-  rename(nBuckets_ci80 = `80%`, nBuckets_ci95 = `95%`) %>%
+  rename(M_Buckets_ci80 = `80%`, M_Buckets_ci95 = `95%`) %>%
   select(-.model)
 
 # Plot
-fit_streaming %>% 
+(M_Buckets_plot <- fit_streaming %>% 
   forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
-  autoplot(df_ts)
+  autoplot(df_ts, colour = "blue", size = 1) +
+  geom_smooth(fill="blue",level = .95))
 
 # -----------------------------------------------------------------------------------------
-# Forecast Antal betalende medlemmer
-# -----------------------------------------------------------------------------------------
-
-# fit ARIMA model
-fit_betalende <- df_ts %>%
-  model(arima = ARIMA(Betalende))
-
-# calculate forecasts
-fc_betalende <- fit_betalende %>% 
-  forecast(h=as.numeric(as.Date("2020-12-31") - today()+1)) %>%
-  hilo() %>% 
-  as_tibble() %>%
-  rename(Betalende_ci80 = `80%`, Betalende_ci95 = `95%`) %>%
-  select(-.model)
-
-# slut antal betalende per md
-betalende_md <- fc_betalende %>%
-  group_by(month = month(Date)) %>%
-  filter(Date == max(Date)) %>%
-  ungroup() %>%
-  mutate(month = month.name[month]) %>%
-  select(month, Betalende)
-
-# -----------------------------------------------------------------------------------------
-# Forecast Antal medlemmer (samlet)
+# Forecast Antal betalende medlemmer i starten af måneden
 # -----------------------------------------------------------------------------------------
 
 # fit ARIMA model
-fit_samlet <- df_ts %>%
-  model(arima = ARIMA(SamletBestand))
+fit_betalende_start <- df_ts %>%
+  model(arima = ARIMA(Betalende_start))
 
 # calculate forecasts
-fc_samlet <- fit_samlet %>% 
-  forecast(h=as.numeric(as.Date("2020-12-31") - today()+1)) %>%
+fc_betalende_start <- fit_betalende_start %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
   hilo() %>% 
   as_tibble() %>%
-  rename(SamletBestand_ci80 = `80%`, SamletBestand_ci95 = `95%`) %>%
+  rename(Betalende_start_ci80 = `80%`, Betalende_start_ci95 = `95%`) %>%
   select(-.model)
 
-# slut antal medlemmer per md
-bestand_md <- fc_samlet %>%
-  group_by(month = month(Date)) %>%
-  filter(Date == max(Date)) %>%
-  ungroup() %>%
-  mutate(month = month.name[month]) %>%
-  select(month, SamletBestand)
+# Plot
+(Betalende_start_plot <- fit_betalende_start %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
+
+# -----------------------------------------------------------------------------------------
+# Forecast Antal betalende medlemmer i slutningen af måneden
+# -----------------------------------------------------------------------------------------
+
+# fit ARIMA model
+fit_betalende_slut <- df_ts %>%
+  model(arima = ARIMA(Betalende_slut))
+
+# calculate forecasts
+fc_betalende_slut <- fit_betalende_slut %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+  hilo() %>% 
+  as_tibble() %>%
+  rename(Betalende_slut_ci80 = `80%`, Betalende_slut_ci95 = `95%`) %>%
+  select(-.model)
+
+# Plot
+(Betalende_slut_plot <- fit_betalende_slut %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
+
+# -----------------------------------------------------------------------------------------
+# Forecast Antal medlemmer (samlet) i starten af måneden
+# -----------------------------------------------------------------------------------------
+
+# fit ARIMA model
+fit_samlet_start <- df_ts %>%
+  model(arima = ARIMA(SamletBestand_start))
+
+# calculate forecasts
+fc_samlet_start <- fit_samlet_start %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+  hilo() %>% 
+  as_tibble() %>%
+  rename(SamletBestand_start_ci80 = `80%`, SamletBestand_start_ci95 = `95%`) %>%
+  select(-.model)
+
+# Plot
+(samlet_start_plot <- fit_betalende_start %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
+
+# -----------------------------------------------------------------------------------------
+# Forecast Antal medlemmer (samlet) i slutningen af måneden
+# -----------------------------------------------------------------------------------------
+
+# fit ARIMA model
+fit_samlet_slut <- df_ts %>%
+  model(arima = ARIMA(SamletBestand_slut))
+
+# calculate forecasts
+fc_samlet_slut <- fit_samlet_slut %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+  hilo() %>% 
+  as_tibble() %>%
+  rename(SamletBestand_slut_ci80 = `80%`, SamletBestand_slut_ci95 = `95%`) %>%
+  select(-.model)
+
+# Plot
+(samlet_slut_plot <- fit_betalende_slut %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
 
 # -----------------------------------------------------------------------------------------
 # Forecast Tilgang
@@ -286,24 +328,27 @@ bestand_md <- fc_samlet %>%
 # all_fc %>%
 #   autoplot(df_ts,level = NULL,size=1)
 
+lambda <- df_ts %>%
+  features(Tilgang, features = guerrero) %>%
+  pull(lambda_guerrero)
+
 # fit ARIMA model
-fit_start <- df_ts %>%
-  filter(Start < mean(Start) +2*sd(Start)) %>% # remove outliers
-  tsibble::fill_gaps() %>% # fill gaps
-  model(arima = ARIMA(Start))
+fit_tilgang <- df_ts %>%
+  #filter(Tilgang < mean(Tilgang) +2*sd(Tilgang)) %>% # remove outliers
+  #tsibble::fill_gaps() %>% # fill gaps
+  model(arima = ARIMA(box_cox(Tilgang,lambda)))
 
 # 7. calculate forecasts
-fc_start <- fit_start %>% 
-  forecast(h=as.numeric(as.Date("2020-12-31") - today()+1)) %>%
+fc_tilgang <- fit_tilgang %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
   as_tibble() %>%
-  select(-.model,-.distribution) %>%
-  rename(tilgang = Start)
+  select(-.model,-.distribution)
 
-# tilgang (sum) per md
-tilgang_md <- fc_start  %>%
-  group_by(month = month(Date)) %>%
-  summarise(tilgang = sum(tilgang)) %>%
-  mutate(month = month.name[month]) 
+# Plot
+(tilgang_plot <- fit_tilgang %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
 
 # -----------------------------------------------------------------------------------------
 # Forecast Afgang
@@ -343,151 +388,198 @@ tilgang_md <- fc_start  %>%
 #   autoplot(df_ts,level = NULL,size=1) cross-validation
 #####
 
+lambda <- df_ts %>%
+  features(Afgang, features = guerrero) %>%
+  pull(lambda_guerrero)
+
 # fit ARIMA model
-fit_end <- df_ts %>%
-  filter(End < mean(End) +2*sd(End)) %>% # remove outliers
-  tsibble::fill_gaps() %>% # fill gaps
-  model(arima = ARIMA(End))
+fit_afgang <- df_ts %>%
+  #filter(Afgang < mean(Afgang) +2*sd(Afgang)) %>% # remove outliers
+  #tsibble::fill_gaps() %>% # fill gaps
+  model(arima = ARIMA(box_cox(Afgang,lambda)))
 
 # 7. calculate forecasts
-fc_end <- fit_end %>% 
-  forecast(h=as.numeric(as.Date("2020-12-31") - today()+1)) %>%
+fc_afgang <- fit_afgang %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
   as_tibble() %>%
-  select(-.model, -.distribution) %>%
-  rename(afgang = End)
+  select(-.model,-.distribution)
 
-# afgang (sum) per md
-afgang_md <- fc_end  %>%
-  group_by(month = month(Date)) %>%
-  summarise(afgang = sum(afgang)) %>%
-  mutate(month = month.name[month]) 
+# Plot
+(afgang_plot <- fit_afgang %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
 
 # -----------------------------------------------------------------------------------------
-# Beregning af Samlet antal antal gratis medlemmer
+# Forecast af antal gratis medlemmer start
 # -----------------------------------------------------------------------------------------
 
-Gratis <- fc_samlet$SamletBestand - fc_betalende$Betalende
+# lambda <- df_ts %>%
+#   features(Gratis_start, features = guerrero) %>%
+#   pull(lambda_guerrero)
+
+# fit ARIMA model
+fit_gratis_start <- df_ts %>%
+  #filter(Afgang < mean(Afgang) +2*sd(Afgang)) %>% # remove outliers
+  #tsibble::fill_gaps() %>% # fill gaps
+  model(arima = ARIMA(Gratis_start))
+
+# 7. calculate forecasts
+fc_gratis_start <- fit_gratis_start %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+  as_tibble() %>%
+  select(-.model,-.distribution)
+
+# Plot
+(gratis_start_plot <- fit_gratis_start %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
+
+# -----------------------------------------------------------------------------------------
+# Forecast af antal gratis medlemmer start
+# -----------------------------------------------------------------------------------------
+
+# lambda <- df_ts %>%
+#   features(Gratis_start, features = guerrero) %>%
+#   pull(lambda_guerrero)
+
+# fit ARIMA model
+fit_gratis_slut <- df_ts %>%
+  #filter(Afgang < mean(Afgang) +2*sd(Afgang)) %>% # remove outliers
+  #tsibble::fill_gaps() %>% # fill gaps
+  model(arima = ARIMA(Gratis_slut))
+
+# 7. calculate forecasts
+fc_gratis_slut <- fit_gratis_slut %>% 
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+  as_tibble() %>%
+  select(-.model,-.distribution)
+
+# Plot
+(gratis_slut_plot <- fit_gratis_slut %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
+
+# -----------------------------------------------------------------------------------------
+# Beregning af antal gratis medlemmer
+# -----------------------------------------------------------------------------------------
+
+Gratis_start <- fc_samlet_start$SamletBestand_start  - fc_betalende_start$Betalende_start
+
+Gratis_slut <- fc_samlet_slut$SamletBestand_slut  - fc_betalende_slut$Betalende_slut
+
+# sammenlign start
+tibble(Gratis_start,fc_gratis =fc_gratis_start$Gratis_start,month = 1:length(Gratis_start)) %>%
+  pivot_longer(-month) %>%
+  ggplot(aes(month,value,colour=name)) +
+  geom_line()
+
+# sammenlign slut
+tibble(Gratis_slut,fc_gratis =fc_gratis_slut$Gratis_slut,month = 1:length(Gratis_slut)) %>%
+  pivot_longer(-month) %>%
+  ggplot(aes(month,value,colour=name)) +
+  geom_line()
 
 # -----------------------------------------------------------------------------------------
 # Beregning af omsætning
 # -----------------------------------------------------------------------------------------
 
-revenue <- fc_betalende %>%
-  mutate(Revenue = Betalende * 2.4) %>%
-  select(Date,Revenue) %>%
-  group_by(month =month(Date)) %>%
-  summarise(Revenue = sum(Revenue)) %>%
-  mutate(month = month.name[month])
+revenue <- fc_betalende_slut %>%
+  mutate(Revenue = (((Betalende_slut + fc_betalende_start$Betalende_start) /2) * 2.4) * 30) %>%
+  select(month,Revenue)
 
 # -----------------------------------------------------------------------------------------
 # Beregning af Gennemsnitlig streamingcost pr. enhed
 # -----------------------------------------------------------------------------------------
 
 streaming_cost <- fc_streaming %>%
-  mutate(Cost = (nBuckets * 27.5) / 100) %>%
-  select(Date, Cost) %>%
-  group_by(month =month(Date)) %>%
-  summarise(Cost = sum(Cost)) %>%
-  mutate(month = month.name[month])
+  mutate(Cost = ((M_Buckets*1000000) * 27.5) / 100) %>%
+  select(month, Cost)
 
 # -----------------------------------------------------------------------------------------
 # Beregning af churn rate
 # -----------------------------------------------------------------------------------------
 
-afgang <- fc_end %>%
-  group_by(month = month(Date)) %>%
-  summarise(afgang = sum(afgang)) %>%
-  mutate(month = month.name[month])
+start_medlemmer <- fc_samlet_start %>%
+  select(month,SamletBestand_start)
 
-start_medlemmer <- fc_samlet %>%
-  group_by(month(Date)) %>%
-  mutate(min = min(Date)) %>%
-  ungroup() %>%
-  filter(Date == min) %>%
-  mutate(month = month.name[month(min)]) %>%
-  select(month, start_medlemmer = SamletBestand)
+slut_medlemmer <- fc_samlet_slut %>%
+  select(month,SamletBestand_slut)
 
-# NB. samme som bestand_md
-slut_medlemmer <- fc_samlet %>%
-  group_by(month(Date)) %>%
-  mutate(max = max(Date)) %>%
-  ungroup() %>%
-  filter(Date == max) %>%
-  mutate(month = month.name[month(max)]) %>%
-  select(month, slut_medlemmer = SamletBestand)
+nye_medlemmer <- slut_medlemmer$SamletBestand_slut - start_medlemmer$SamletBestand_start
 
-nye_medlemmer <- slut_medlemmer %>%
-  mutate(nye_medlemmer = slut_medlemmer - start_medlemmer$start_medlemmer) %>%
-  select(month, nye_medlemmer)
-
-churn <- afgang %>%
+churn <- fc_afgang %>%
   inner_join(start_medlemmer) %>%
   inner_join(slut_medlemmer) %>%
-  inner_join(nye_medlemmer) %>%
-  mutate(ChurnRate1 = afgang / (start_medlemmer + nye_medlemmer) * 100,
-         ChurnRate2 = afgang / (start_medlemmer/2 + slut_medlemmer/2) * 100) %>%
+  mutate(nye_medlemmer = SamletBestand_slut - SamletBestand_start) %>%
+  mutate(ChurnRate1 = Afgang / (SamletBestand_start + nye_medlemmer) * 100,
+         ChurnRate2 = Afgang / (SamletBestand_start/2 + SamletBestand_slut/2) * 100) %>%
   select(month,ChurnRate1, ChurnRate2)
 
 # -----------------------------------------------------------------------------------------
 # Forecast af antal der streamer
 # -----------------------------------------------------------------------------------------
 
-# df4 %>%
-#   mutate(month = yearmonth(as.Date(month))) %>%
-#   filter(month != max(month)) %>%
-#   ggplot(aes(month,n)) +
-#   geom_line()
-
-df4_ts <- df4 %>%
-  mutate(month = yearmonth(as.Date(month))) %>%
-  filter(month != max(month)) %>%
-  as_tsibble()
+# lambda <- df_ts %>%
+#   features(AntalStreamere, features = guerrero) %>%
+#   pull(lambda_guerrero)
 
 # fit ARIMA model
-fit_streamers <- df4_ts %>%
-  model(arima = ARIMA(n))
+fit_streamers <- df_ts %>%
+  model(arima = ARIMA(AntalStreamere))
 
 # 7. calculate forecasts
 fc_streamers <- fit_streamers %>% 
-  forecast(h=as.numeric(month(as.Date("2020-12-31")) - month(today())+1)) %>%
+  forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
   as_tibble() %>%
   select(-.model, -.distribution)
 
-fc_streamers <- fc_streamers %>%
-  as_tibble() %>%
-  mutate(month = month.name[month(as.Date(month))]) %>%
-  rename(AntalStreamere = n)
+# Plot
+(streamers_plot <- fit_streamers %>% 
+    forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
+    autoplot(df_ts, colour = "blue", size = 1) +
+    geom_smooth(fill="blue",level = .95))
 
 # -----------------------------------------------------------------------------------------
 # output
 # -----------------------------------------------------------------------------------------
 
-daily_fc <- fc_betalende %>%
-  mutate(Gratis = Gratis) %>%
-  inner_join(fc_samlet) %>%
-  inner_join(fc_start) %>%
-  inner_join(fc_end) %>%
-  mutate_if(is.numeric, round)
+forecasts = list(fc_betalende_start,
+                 fc_betalende_slut,
+                 fc_gratis_start,
+                 fc_gratis_slut,
+                 fc_samlet_start,
+                 fc_samlet_slut,
+                 fc_tilgang,
+                 fc_afgang,
+                 fc_streaming,
+                 fc_streamers,
+                 revenue,
+                 streaming_cost,
+                 churn)
+
+output <- forecasts %>% 
+  reduce(inner_join,by="month") %>%
+  mutate(Gratis_start_beregn. = Gratis_start,
+         Gratis_slut_beregn. = Gratis_slut,
+         AndelStreamere = AntalStreamere / ((SamletBestand_slut + SamletBestand_start) / 2) * 100) %>%
+  select(month:Gratis_slut,
+         Gratis_start_beregn.:Gratis_slut_beregn.,
+         SamletBestand_start:AntalStreamere,
+         AndelStreamere,
+         Revenue:ChurnRate2) %>% 
+  mutate_if(is.numeric, round,2)
 
 
-monthly <- revenue %>%
-  inner_join(streaming_cost) %>%
-  inner_join(churn) %>%
-  inner_join(betalende_md) %>%
-  inner_join(bestand_md) %>%
-  inner_join(tilgang_md) %>%
-  inner_join(afgang_md) %>%
-  inner_join(fc_streamers) %>%
-  mutate(AndelStreamere = AntalStreamere / ((slut_medlemmer$slut_medlemmer + start_medlemmer$start_medlemmer) / 2) * 100) %>%
-  mutate_at(vars(Revenue, Cost,Betalende,SamletBestand,tilgang,afgang,AntalStreamere), round) %>%
-  mutate_at(vars(ChurnRate1, ChurnRate2,AndelStreamere), round,1)
-
-
-data <- list(Daily = daily_fc, Monthly = monthly)
+#data <- list(Daily = daily_fc, Monthly = monthly)
 
 filename <- glue::glue("C:/Users/pech/Desktop/RProjects/ForecastAbo/forecasts/forecasts_{today()}.xlsx")
 
-write.xlsx(data, file = filename)
+#write.xlsx(output, file = filename)
+write.xlsx(output, file = "testfile.xlsx")
+
 
 # -----------------------------------------------------------------------------------------
 # send email
@@ -505,7 +597,7 @@ quote_string <- paste0(quote," - ",author)
 
 email <- envelope() %>%
   from("pech@saxo.com") %>%
-  to("psl@saxo.com") %>% 
+  to("pech@saxo.com") %>% 
   cc("pech@saxo.com") %>%
   subject(glue::glue("Forecasts {today()}")) %>%
   text(glue::glue("Hej Peder\n\nHer kommer nye forecasts for Premiumbestanden samt diverse beregninger t.o.m. slutningen af 2020.\n\n\n{quote_string}")) %>% 
