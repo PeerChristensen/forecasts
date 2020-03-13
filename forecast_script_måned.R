@@ -269,7 +269,7 @@ fc_samlet_start <- fit_samlet_start %>%
   select(-.model)
 
 # Plot
-(samlet_start_plot <- fit_betalende_start %>% 
+(samlet_start_plot <- fit_samlet_start %>% 
     forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
     autoplot(df_ts, colour = "blue", size = 1) +
     geom_smooth(fill="blue",level = .95))
@@ -291,7 +291,7 @@ fc_samlet_slut <- fit_samlet_slut %>%
   select(-.model)
 
 # Plot
-(samlet_slut_plot <- fit_betalende_slut %>% 
+(samlet_slut_plot <- fit_samlet_slut %>% 
     forecast(h=month(as.Date("2020-12-31")) - month(today())+1) %>%
     autoplot(df_ts, colour = "blue", size = 1) +
     geom_smooth(fill="blue",level = .95))
@@ -631,6 +631,21 @@ output <- forecasts %>%
          Revenue:ChurnRate2) %>% 
   mutate_if(is.numeric, round,2)
 
+# -----------------------------------------------------------------------------------------
+# Plots
+# -----------------------------------------------------------------------------------------
+
+gridExtra::grid.arrange(
+  samlet_start_plot,
+  samlet_slut_plot,
+  Betalende_start_plot,
+  Betalende_slut_plot,
+  gratis_start_plot,
+  gratis_slut_plot,
+  tilgang_plot,
+  afgang_plot,
+  M_Buckets_plot,
+  streamers_plot)
 
 #data <- list(Daily = daily_fc, Monthly = monthly)
 
