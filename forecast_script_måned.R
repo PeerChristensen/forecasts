@@ -32,8 +32,10 @@ library(emayili)
 library(fable)
 library(feasts)
 
-theme_set(theme_minimal())
-# 
+theme_set(theme_minimal() +
+            theme(axis.title.y = element_text(size = 14),
+                  axis.title.x = element_blank()))
+
 # # -----------------------------------------------------------------------------------------
 # # SQL login
 # # -----------------------------------------------------------------------------------------
@@ -173,12 +175,14 @@ df <- read_csv2("forecast_data_2020-03-12.csv") %>%
   mutate(M_Buckets = as.numeric(M_Buckets),
          month = yearmonth(month))
 
-df %>%
-  pivot_longer(cols = -month) %>%
-  ggplot(aes(month,value)) +
-    geom_line() +
-    facet_wrap(~name,scales="free") +
-  theme_minimal()
+# plot all elements to date
+
+# df %>%
+#   pivot_longer(cols = -month) %>%
+#   ggplot(aes(month,value)) +
+#     geom_line() +
+#     facet_wrap(~name,scales="free") +
+#   theme_minimal()
     
 # create tsibble
 df_ts <- df  %>% 
@@ -437,7 +441,7 @@ fc_gratis_start <- fit_gratis_start %>%
     geom_smooth(fill="blue",level = .95))
 
 # -----------------------------------------------------------------------------------------
-# Forecast af antal gratis medlemmer start
+# Forecast af antal gratis medlemmer slut
 # -----------------------------------------------------------------------------------------
 
 # lambda <- df_ts %>%
@@ -466,9 +470,9 @@ fc_gratis_slut <- fit_gratis_slut %>%
 # Beregning af antal gratis medlemmer
 # -----------------------------------------------------------------------------------------
 
-Gratis_start <- fc_samlet_start$SamletBestand_start  - fc_betalende_start$Betalende_start
+Gratis_start_beregn. <- fc_samlet_start$SamletBestand_start  - fc_betalende_start$Betalende_start
 
-Gratis_slut <- fc_samlet_slut$SamletBestand_slut  - fc_betalende_slut$Betalende_slut
+Gratis_slut_beregn. <- fc_samlet_slut$SamletBestand_slut  - fc_betalende_slut$Betalende_slut
 
 # sammenlign start
 tibble(Gratis_start,fc_gratis =fc_gratis_start$Gratis_start,month = 1:length(Gratis_start)) %>%
@@ -554,6 +558,40 @@ for (i in names(df[,-1])) {
   
   df_ts_i <- df %>% select(month,i) %>% as_tsibble()
   
+  if(str_detect(i,"Tilgang")) {
+    
+    lambda <- df_ts_i %>%
+       features(Tilgang,features = guerrero) %>%
+       pull(lambda_guerrero)
+    
+    fc <- df_ts_i %>%
+      slice(-n()) %>%
+      stretch_tsibble(.init = 5,.step=1) %>%
+      model(
+        arima = ARIMA(box_cox(Tilgang,lambda = lambda))
+      ) %>%
+      forecast(h = "1 month")
+    
+    acc <- accuracy(fc, df_ts_i)
+  }
+  
+  if(str_detect(i,"Afgang")) {
+    
+    lambda <- df_ts_i %>%
+      features(Afgang,features = guerrero) %>%
+      pull(lambda_guerrero)
+    
+    fc <- df_ts_i %>%
+      slice(-n()) %>%
+      stretch_tsibble(.init = 5,.step=1) %>%
+      model(
+        arima = ARIMA(box_cox(Afgang,lambda = lambda))
+      ) %>%
+      forecast(h = "1 month")
+    
+    acc <- accuracy(fc, df_ts_i)
+  }
+    
   fc <- df_ts_i %>%
     slice(-n()) %>%
     stretch_tsibble(.init = 5,.step=1) %>%
@@ -568,8 +606,8 @@ for (i in names(df[,-1])) {
 }
 
 cv_accuracies <- cv_accuracies %>%
-  mutate(name = names(df[,-1])) %>%
-  select(name, .model, cvMAPE = MAPE)
+  mutate(Forecast = names(df[,-1])) %>%
+  select(Forecast, .model, cvMAPE = MAPE)
 
 # simple validation
 
@@ -581,25 +619,53 @@ for (i in names(df[,-1])) {
   
   train <- df_ts_i %>% filter(month <= yearmonth(today()-months(2)))
   
-  fit <- train %>%
-    model(
-      arima = ARIMA()
-    )
+  if(str_detect(i,"Tilgang")) {
+    
+    lambda <- train %>%
+      features(Tilgang,features = guerrero) %>%
+      pull(lambda_guerrero)
+    
+    fc <- train %>%
+      model(
+        arima = ARIMA(box_cox(Tilgang,lambda = lambda))) %>%
+      forecast(h = "1 month")
+    
+    acc <- accuracy(fc, df_ts_i)
+  }
   
-  fc <- fit %>%
+  if(str_detect(i,"Afgang")) {
+    
+    lambda <- train %>%
+      features(Afgang,features = guerrero) %>%
+      pull(lambda_guerrero)
+    
+    fc <- train %>%
+      model(
+        arima = ARIMA(box_cox(Afgang,lambda = lambda))) %>%
+      forecast(h = "1 month")
+    
+    acc <- accuracy(fc, df_ts_i)
+  } else {
+  
+  fc <- train %>%
+    model(
+      arima = ARIMA()) %>%
     forecast(h = "1 month")
   
-  acc <- accuracy(fc, df_ts_i)
-  accuracies = rbind(accuracies,acc)
+  acc <- accuracy(fc, df_ts_i) 
+  }
   
+  accuracies = rbind(accuracies,acc)
 }
 
 accuracies <- accuracies %>%
-  mutate(name = names(df[,-1])) %>%
-  select(name, .model, MAPE)
+  mutate(Forecast = names(df[,-1])) %>%
+  select(Forecast, .model, MAPE)
 
 accuracy_output <- cv_accuracies %>%
-  inner_join(accuracies)
+  inner_join(accuracies) %>%
+  filter(!str_detect(Forecast, "Gratis")) %>%
+  mutate_if(is.numeric,round,1)
 
 # -----------------------------------------------------------------------------------------
 # output
@@ -607,8 +673,8 @@ accuracy_output <- cv_accuracies %>%
 
 forecasts = list(fc_betalende_start,
                  fc_betalende_slut,
-                 fc_gratis_start,
-                 fc_gratis_slut,
+                 #fc_gratis_start,
+                 #fc_gratis_slut,
                  fc_samlet_start,
                  fc_samlet_slut,
                  fc_tilgang,
@@ -621,39 +687,47 @@ forecasts = list(fc_betalende_start,
 
 output <- forecasts %>% 
   reduce(inner_join,by="month") %>%
-  mutate(Gratis_start_beregn. = Gratis_start,
-         Gratis_slut_beregn. = Gratis_slut,
+  mutate(month = as.character(yearmonth(month)),
+         Gratis_start_beregn. = Gratis_start_beregn.,
+         Gratis_slut_beregn. = Gratis_slut_beregn.,
          AndelStreamere = AntalStreamere / ((SamletBestand_slut + SamletBestand_start) / 2) * 100) %>%
-  select(month:Gratis_slut,
+  select(month:Betalende_slut_ci95,
          Gratis_start_beregn.:Gratis_slut_beregn.,
          SamletBestand_start:AntalStreamere,
          AndelStreamere,
          Revenue:ChurnRate2) %>% 
-  mutate_if(is.numeric, round,2)
+  mutate_at(vars(Betalende_start,Betalende_slut,
+                 Gratis_start_beregn.:SamletBestand_start,
+                 SamletBestand_slut,Tilgang,Afgang,AntalStreamere,
+                 Revenue,Cost), round)  %>%
+  mutate_at(vars(M_Buckets, AndelStreamere,ChurnRate1,ChurnRate2),round,1)
 
 # -----------------------------------------------------------------------------------------
 # Plots
 # -----------------------------------------------------------------------------------------
 
-gridExtra::grid.arrange(
+plots <- gridExtra::arrangeGrob(
   samlet_start_plot,
   samlet_slut_plot,
   Betalende_start_plot,
   Betalende_slut_plot,
-  gratis_start_plot,
-  gratis_slut_plot,
+  #gratis_start_plot,
+  #gratis_slut_plot,
   tilgang_plot,
   afgang_plot,
   M_Buckets_plot,
   streamers_plot)
 
-#data <- list(Daily = daily_fc, Monthly = monthly)
+plots_filename <- glue::glue("forecast_grafer_{today()}.png")
+
+ggsave(plots_filename,plots,width=14,height=9)
+
+data <- list(Forecasts = output, Evaluering = accuracy_output)
 
 filename <- glue::glue("C:/Users/pech/Desktop/RProjects/ForecastAbo/forecasts/forecasts_{today()}.xlsx")
 
 #write.xlsx(output, file = filename)
-write.xlsx(output, file = "testfile.xlsx")
-
+write.xlsx(data, file = "testfile.xlsx")
 
 # -----------------------------------------------------------------------------------------
 # send email
@@ -677,7 +751,6 @@ email <- envelope() %>%
   text(glue::glue("Hej Peder\n\nHer kommer nye forecasts for Premiumbestanden samt diverse beregninger t.o.m. slutningen af 2020.\n\n\n{quote_string}")) %>% 
   attachment(filename)
 
-
 creds <- read_rds("C:/Users/pech/Desktop/RProjects/ForecastAbo/email_credentials.rds")
 
 smtp <- server(host     = creds[[1]],
@@ -686,5 +759,4 @@ smtp <- server(host     = creds[[1]],
                password = creds[[4]],)
 
 smtp(email, verbose = F)
-
 
