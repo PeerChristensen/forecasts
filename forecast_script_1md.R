@@ -795,7 +795,7 @@ data <- list(Forecasts = output, Evaluering = accuracy_output)
 filename <- glue::glue("C:/Users/pech/Desktop/RProjects/ForecastAbo/forecasts/forecasts_{month.name[month(today())]}.xlsx")
 
 #write.xlsx(output, file = filename)
-write.xlsx(data, file = "testfil_md_forecasts.xlsx")
+write.xlsx(data, file = glue::glue("testfil_md_forecasts_{month.name[month(today())]}.xlsx"))
 
 # -----------------------------------------------------------------------------------------
 # send email
