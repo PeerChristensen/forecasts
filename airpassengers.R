@@ -7,6 +7,7 @@ library(fable)
 
 
 df_ts <- AirPassengers %>% as_tsibble()
+range(df_ts$index)
 
 df_ts %>%
   model(ARIMA(value)) %>% #fabletools
@@ -14,7 +15,7 @@ df_ts %>%
   autoplot(df_ts)
 
 df_ts2 <- df_ts %>%
-  slice(1:26)
+  head(26)
 
 df_ts2 %>%
   model(ARIMA(value)) %>%
